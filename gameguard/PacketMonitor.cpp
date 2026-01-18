@@ -16,7 +16,7 @@ PacketMonitor::PacketMonitor(const NetworkConfig &config, int mode, bool XDP)
 
 	m_context = make_unique<SharedContext>(config);
 
-	m_context->g_bRunning=true;
+	m_context->g_bRunning = true;
 	m_packetDetect = make_unique<PacketDetect>(*m_context, m_mode, XDP);
 
 	if (m_mode == eMode::MODE_NETFILTER)
@@ -101,8 +101,12 @@ bool PacketMonitor::LoadXDP(const char *bpf_file, const char *if_name)
 		return false;
 	}
 
-	// 4. 블랙리스트 맵 FD 저장 (가장 중요!)
+// 4. 블랙리스트 맵 FD 저장 (가장 중요!)
+#ifdef __XDP_GLOBALMAP__
+	m_context->m_xdp_map_fd = bpf_object__find_map_fd_by_name(m_bpf_obj, "global_pps_map");
+#else
 	m_context->m_xdp_map_fd = bpf_object__find_map_fd_by_name(m_bpf_obj, "blacklist_map");
+#endif
 
 	printf("[System] XDP filter attached to %s (Map FD: %d)\n", if_name, m_context->m_xdp_map_fd);
 	return true;

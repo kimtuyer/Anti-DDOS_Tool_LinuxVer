@@ -24,6 +24,7 @@ public:
 	void packet_ResetInline(unsigned char *pkt_data, int len, nfq_data *nfa, const pcap_t *adhandle);
 
 	void UpdateXdpBlcaklist(uint32_t srcip);
+	void ResetXdpBlacklist();
 private:
 	void _packet_DstSetting(DESTINATION eTarget);
 	std::vector<thread> ThreadPool;

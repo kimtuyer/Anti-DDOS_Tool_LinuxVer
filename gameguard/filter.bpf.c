@@ -4,7 +4,19 @@
 #include <linux/ip.h>
 #include <linux/tcp.h>
 #include <bpf/bpf_helpers.h>
+#include <bpf/bpf_endian.h> // 이 헤더가 있으면 __bpf_htonl 사용 가능
+#define __XDP_GLOBAL__
 
+#ifdef __XDP_GLOBAL__
+// 2. Rand-IP 공격에 대응하기 위한 글로벌 맵 정의
+struct
+{
+    __uint(type, BPF_MAP_TYPE_ARRAY); // 단일 값을 저장하기 위해 Array 사용
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, __u64);
+} global_pps_map SEC(".maps");
+#else
 // 1. 블랙리스트 IP를 저장할 eBPF 맵 정의
 struct
 {
@@ -14,6 +26,7 @@ struct
     __uint(value_size, sizeof(__u32)); // 차단 여부 (보통 1)
 } blacklist_map SEC(".maps");
 
+#endif
 SEC("xdp")
 int xdp_filter_main(struct xdp_md *ctx)
 {
@@ -43,15 +56,36 @@ int xdp_filter_main(struct xdp_md *ctx)
         return XDP_PASS;
     }
 
+#ifdef __XDP_GLOBAL__
+    __u32 key = 0;
+    __u64 *total_count = bpf_map_lookup_elem(&global_pps_map, &key);
+    __u32 src_ip = iph->saddr;
+    if (total_count)
+    {
+        __sync_fetch_and_add(total_count, 1);
+        //char fmt1[] = "total count:%llu\n";
+        //bpf_trace_printk(fmt1, sizeof(fmt1), *total_count);
+        if (*total_count > 5000)
+        { // 초당 전체 SYN이 1만개를 넘으면
+            char fmt[] = "DROP TRIGGERED! count:%llu\n";
+            bpf_trace_printk(fmt, sizeof(fmt), *total_count);
+            if (src_ip == bpf_htonl(0xC0A81501))
+            {
+                return XDP_PASS;
+            }
+            return XDP_DROP;
+        }
+    }
+#else
     // 4. 블랙리스트 맵에서 소스 IP 조회
     __u32 src_ip = iph->saddr;
     __u32 *value = bpf_map_lookup_elem(&blacklist_map, &src_ip);
-
     if (value)
     {
         // ★ 마법의 구간: 블랙리스트에 있으면 유저모드로 안 보내고 즉시 삭제!
         return XDP_DROP;
     }
+#endif
 
     // 정상 패킷은 기존대로 Netfilter 스택으로 보냄
     return XDP_PASS;

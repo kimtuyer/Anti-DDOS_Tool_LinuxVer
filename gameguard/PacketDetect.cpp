@@ -470,7 +470,11 @@ bool PacketDetect::packet_AnalyzeInline(unsigned char *pkt_data, int len, nfq_da
         // [검사 1] 블랙리스트 여부 확인 (가장 빠름)
         if (local_blacklist.contains(src_ip))
         {
-            // printf("blacklist drp: %u\n", src_ip);
+            struct in_addr ip_addr;
+            ip_addr.s_addr = (uint32_t)src_ip;
+            //printf("XDP DROP -> IP: %s\n", inet_ntoa(ip_addr));
+            printf("XDP DROP -> IP: %s\n", inet_ntoa(ip_addr));
+            //printf("blacklist drop: %u\n", src_ip);
             lock.unlock();
             return true; // 즉시 DROP
         }
@@ -482,7 +486,7 @@ bool PacketDetect::packet_AnalyzeInline(unsigned char *pkt_data, int len, nfq_da
             if (it->second.syn_count > 10 || it->second.TotalCount > 100)
             {
                 lock.unlock();
-                // printf("[BLOCK] SYN Flood Detected from IP: %u. Dropping...\n", src_ip);
+                printf("[BLOCK] SYN Flood Detected from IP: %u. Dropping...\n", src_ip);
                 std::unique_lock<std::shared_mutex> u_lock(m_shared_statsMutex);
                 // std::lock_guard<std::mutex> lock(m_statsMutex); // 통계 데이터 보호
                 local_blacklist.insert(src_ip); // 블랙리스트 등록

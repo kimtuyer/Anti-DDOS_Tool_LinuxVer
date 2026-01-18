@@ -28,6 +28,8 @@
 #define __LINUX__
 #define __NETFILTER__
 #define __XDP__
+#define __XDP_GLOBALMAP__
+
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
 #include <libnetfilter_queue/libnetfilter_queue.h>

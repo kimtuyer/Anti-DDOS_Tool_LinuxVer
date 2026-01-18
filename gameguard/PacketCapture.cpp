@@ -131,6 +131,24 @@ void PacketCapture::packet_handler(u_char *user, const pcap_pkthdr *header, cons
 void PacketCapture::Run()
 {
 
+#ifdef __XDP_GLOBALMAP__
+	// 1. PPS 리셋 전용 스레드 추가
+	thread timerThread([this]()
+					   {
+        uint32_t key = 0;
+        uint64_t zero = 0;
+        while (true) {
+            this_thread::sleep_for(chrono::seconds(1)); // 1초 대기
+            // global_pps_map의 0번 인덱스를 0으로 초기화
+			//uint64_t current_pps;
+            //bpf_map_lookup_elem(ctx.m_xdp_map_fd, &key, &current_pps);
+			//printf("Current PPS: %llu\n", current_pps);
+            bpf_map_update_elem(ctx.m_xdp_map_fd, &key, &zero, BPF_ANY);
+            
+            // (선택사항) 현재 PPS 로그 출력해서 모니터링
+        } });
+	timerThread.detach(); // 메인 로직과 별개로 계속 돌아가게 함
+#endif
 #ifdef __NETFILTER__
 	// iptables 설정
 	SetupIptables(NUM_WORKER_THREADS, ctx.config.server_port);
@@ -265,7 +283,7 @@ void PacketCapture::_RunNetfilter(int queue_num)
 			}
 			if (errno == ENOBUFS)
 			{
-				//핵심: 큐가 꽉 찼을 때는 break 하지 않고 경고만 찍고 계속 진행
+				// 핵심: 큐가 꽉 찼을 때는 break 하지 않고 경고만 찍고 계속 진행
 				fprintf(stderr, "[Warn] NFQUEUE Buffer Overflow (ENOBUFS)\n");
 				continue;
 			}
