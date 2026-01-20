@@ -16,3 +16,6 @@ Multi-threaded Engine: 고성능 패킷 처리를 위한 멀티스레딩 및 std
 
 처음에는 Pcap 기반의 Out-of-Path 방식으로 서버로 가는 패킷을 복사한 후에, 공격 여부를 판단해 RST패킷을 전송하는 사후 처리 방식이었으나, 탐지 시점에 이미 원본 패킷이 유저 어플리케이션에 도달할 수 있는 구조적 한계를 인지하고, Netfilter(NFQUEUE) 방식의 인라인 구조를 도입하여 사전 길목 차단이 가능하도록 발전시켰습니다. 최종적으로 Netfilter의 CPU 자원 소모 한계를 극복하고자 eBPF/XDP 기술을 도입하여 방어 성능을 극대화했습니다.
 
+---2026.1.20일자 업데이트---
+XDP PER-CPU Map 적용, PPS 1만이하 기준 cpu 점유율 20% ->1%미만 감소.
+https://www.youtube.com/watch?v=nxd7ltyqchE
