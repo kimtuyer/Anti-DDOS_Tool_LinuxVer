@@ -5,8 +5,9 @@
 #include <linux/tcp.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h> // 이 헤더가 있으면 __bpf_htonl 사용 가능
-#define __XDP_GLOBAL__ //Rand-IP 공격에 대응하기 위한 글로벌 맵 정의
-//#define __PERCPU__ // 다중 CPU 코어별 카운팅
+#define __XDP_GLOBAL__      // Rand-IP 공격에 대응하기 위한 글로벌 맵 정의
+#define __PERCPU__          // 다중 CPU 코어별 카운팅
+const int SERVER_CNT = 4;
 
 #ifdef __XDP_GLOBAL__
 struct
@@ -31,6 +32,38 @@ struct
 } blacklist_map SEC(".maps");
 
 #endif
+
+static __always_inline void update_csum16(__u16 *csum, __u16 old_val, __u16 new_val) {
+    __u32 new_csum_value;
+    __u32 tmp_csum = ~(*csum) & 0xFFFF; // 1. 현재 체크섬의 반전값(합계)을 구함
+    __u32 tmp_old = ~old_val & 0xFFFF;  // 2. 예전 값의 반전
+    __u32 tmp_new = new_val & 0xFFFF;   // 3. 새 값
+
+    // 공식: new_csum = ~(~old_csum + ~old_val + new_val)
+    new_csum_value = tmp_csum + tmp_old + tmp_new;
+    
+    // 16비트 오버플로우(Carry) 처리
+    new_csum_value = (new_csum_value & 0xFFFF) + (new_csum_value >> 16);
+    *csum = ~((__u16)new_csum_value);
+}
+unsigned short CalPortNumber(int hashkey)
+{
+    switch (hashkey)
+    {
+    case 0:
+        return bpf_htons(25001);
+    case 1:
+        return bpf_htons(25002);
+    case 2:
+        return bpf_htons(25003);
+    case 3:
+        return bpf_htons(25004);
+    default:
+        return -1;
+    }
+    return -1;
+}
+
 SEC("xdp")
 int xdp_filter_main(struct xdp_md *ctx)
 {
@@ -71,6 +104,25 @@ int xdp_filter_main(struct xdp_md *ctx)
 #else
         __sync_fetch_and_add(total_count, 1);
 #endif
+        if (tcp->dest == bpf_htons(25000))
+        {
+            int hashkey = *total_count % SERVER_CNT;
+            unsigned short oldport = tcp->dest;
+            unsigned short newport = CalPortNumber(hashkey);
+            if (newport == (unsigned short)-1)
+            {
+                char fmt[] = "PORT HASHING FAIL!:%llu\n";
+                bpf_trace_printk(fmt, sizeof(fmt), newport);
+                return XDP_DROP;
+            }
+            tcp->dest = newport;
+            // 포트번호 변경 인한 새로 체크섬 계산!
+            //__u32 csum_off = offsetof(struct tcphdr, check);
+            __u32 old_val = oldport;
+            __u32 new_val = newport;
+           update_csum16(&tcp->check, oldport, newport);
+
+        }
         // char fmt1[] = "total count:%llu\n";
         // bpf_trace_printk(fmt1, sizeof(fmt1), *total_count);
         if (*total_count > 2500)
