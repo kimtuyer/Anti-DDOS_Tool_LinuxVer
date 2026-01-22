@@ -1,21 +1,71 @@
-🛡️ Anti-DDOS_Tool_LinuxVer
-eBPF/XDP 기반의 고성능 커널 레벨 차단 엔진을 탑재한 지능형 Anti-DDoS 솔루션
+🛡️ Xdp-L4-traffic-engine
+BPF/XDP 기반의 인라인 패킷 처리 엔진을 구현하여,
+ 환경을 위한 L4 로드 밸런싱 및 트래픽 필터링 기능을 제공합니다.
 
-
+----------------------------------------------------------------------------------------------------------------------------------------------
 🚀 핵심 기술 스택 (Key Highlights)
-Zero-Copy Packet Dropping: 리눅스 커널 입구(XDP)에서 공격 패킷을 즉시 파기하여 CPU 오버헤드 최소화.
+🔹 Inline L4 Traffic Processing Engine
 
-User-Kernel Collaborative Defense: 유저 모드의 정교한 상태 분석(Stateful Analysis)과 커널 모드의 초고속 차단(Hardware-level Speed) 결합.
+eBPF/XDP 기반 인라인 패킷 처리 엔진으로, 리눅스 네트워크 스택 진입 이전 단계에서 트래픽을 분류·제어.
 
-Stateful SYN Flood Detection: 단순 임계치를 넘어 SYN/ACK 비율 분석 및 Emergency Mode(First Drop) 로직 구현.
+대규모 L4 트래픽 환경에서도 저지연·고처리량 패킷 경로를 유지하도록 설계.
 
-Multi-threaded Engine: 고성능 패킷 처리를 위한 멀티스레딩 및 std::shared_mutex 기반의 Lock-free 지향 설계.
+🔹 DSR-based L4 Load Balancing
 
+DSR(Direct Server Return) 아키텍처를 적용하여 응답 패킷이 로드밸런서를 우회하도록 설계.
+
+커널 레벨에서 목적지 포트 변조 및 L4 체크섬 보정을 수행하여, 네트워크 병목을 최소화한 부하 분산 구현.
+
+eBPF Map 기반 세션 관리로 대규모 동시 연결 환경에서도 안정적인 트래픽 분산 제공.
+
+🔹 Zero-Copy Packet Filtering
+
+리눅스 커널 입구(XDP)에서 불필요한 패킷을 Zero-copy 방식으로 즉시 처리하여 CPU 오버헤드 최소화.
+
+정상 트래픽과 비정상 트래픽을 조기에 분리하여 커널 네트워크 스택 부하 감소.
+
+🔹 User–Kernel Collaborative Processing
+
+유저 영역에서의 상태 기반(Stateful) 트래픽 분석과,
+
+커널 영역에서의 **초고속 패킷 처리(XDP)**를 결합한 협업 구조 설계.
+
+🔹 Stateful Traffic Analysis & Flood Mitigation
+
+단순 임계치 기반이 아닌 SYN/ACK 비율 분석을 통한 상태 기반 트래픽 판단.
+
+공격 상황 감지 시 Emergency Mode(First Drop) 전환으로 시스템 가용성 보호.
+
+🔹 High-Performance Concurrent Architecture
+
+고성능 패킷 처리를 위한 멀티스레드 구조 설계.
+
+Per-CPU Map 기반 Lock-free 지향 아키텍처로 캐시 경합 및 동기화 오버헤드 최소화.
+
+----------------------------------------------------------------------------------------------------------------------------------------------
 📝 프로젝트 소개 (Introduction)
-본 프로젝트는 앞서 개발한 Window환경에서 동작하는 GameGuard 프로젝트 ( https://github.com/kimtuyer/GameGuardian) 를 베이스로 삼아 리눅스 환경에서 대규모 네트워크 공격(SYN Flood 등)을 효율적으로 방어하기 위해 개발되었습니다.
+본 프로젝트는 앞서 개발한 Window환경에서 동작하는 GameGuard 프로젝트 ( https://github.com/kimtuyer/GameGuardian) 를 베이스로 삼아 리눅스 환경에서 대규모 네트워크 공격을 효율적으로 방어하고 , 고성능 트래픽 제어를 실현하기 위해 개발되었습니다.
 
-처음에는 Pcap 기반의 Out-of-Path 방식으로 서버로 가는 패킷을 복사한 후에, 공격 여부를 판단해 RST패킷을 전송하는 사후 처리 방식이었으나, 탐지 시점에 이미 원본 패킷이 유저 어플리케이션에 도달할 수 있는 구조적 한계를 인지하고, Netfilter(NFQUEUE) 방식의 인라인 구조를 도입하여 사전 길목 차단이 가능하도록 발전시켰습니다. 최종적으로 Netfilter의 CPU 자원 소모 한계를 극복하고자 eBPF/XDP 기술을 도입하여 방어 성능을 극대화했습니다.
+본 프로젝트는 **eBPF/XDP** 기반의 **인라인 패킷 처리 엔진**을 구현합니다.
+이 엔진은 최소한의 지연 시간으로 높은 처리량의 L4 트래픽을 처리하도록 설계되었습니다.
 
+이 시스템은 Linux 네트워크 스택의 최하위 계층에서 **패킷 필터링 및 L4 로드 밸런싱**을 수행하여 불필요한 패킷이 커널 네트워킹 서브시스템에 도달하는 것을 방지합니다.
+
+PCAP 기반의 경로 이탈(out-of-path) 설계에서 시작하여,
+Netfilter(NFQUEUE)를 거쳐 성능 및 확장성 제약을 모두 해결하는 완전한 **XDP 기반 인라인 모델**로 발전했습니다.
+
+혼잡한 트래픽 환경에서 처리량을 극대화하기 위해, 엔진은 **락 프리(lock-free)** 방식의 CPU별 맵 기반 세션 관리 전략을 채택합니다.
+
+또한, **DSR(Direct Server Return)** 로드 밸런싱 모델을 구현하여,
+응답 패킷이 로드 밸런서를 완전히 우회할 수 있도록 함으로써 대규모 트래픽 환경에서 반환 경로 병목 현상을 제거합니다.
+
+----------------------------------------------------------------------------------------------------------------------------------------------
 ---2026.1.20일자 업데이트---
 XDP PER-CPU Map 적용, PPS 1만이하 기준 cpu 점유율 20% ->1%미만 감소.
 https://www.youtube.com/watch?v=nxd7ltyqchE
+
+---2026.1.21일자 업데이트---
+[ L4 로드밸런서 도입 및 트래픽 제어 최적화 ]
+기능 확장: 단순 패킷 차단을 넘어 eBPF 기반의 DSR(Direct Server Return) 아키텍처 로드밸런싱 기능 구현.
+
+
