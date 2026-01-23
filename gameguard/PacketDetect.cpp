@@ -412,9 +412,13 @@ bool PacketDetect::packet_AnalyzeInline(unsigned char *pkt_data, int len, nfq_da
     TcpHeader *pTcp = (TcpHeader *)(pkt_data + ipHeaderLen);
 
     // 공격시 ping 테스트하는 내 호스트 ip는 통과!
-    uint32_t my_host_ip = inet_addr("192.168.21.1");
-    if (src_ip == my_host_ip)
-        return false;
+    // uint32_t my_host_ip = inet_addr("192.168.21.1");
+    // if (src_ip == my_host_ip)
+    // {
+    //     printf("my_host_ip IP: %u\n", src_ip);
+
+    //     return false;
+    // }
     // SSH 패킷은 차단 대상에서 제외!
     if (ntohs(pTcp->dstPort) == 22 || ntohs(pTcp->srcPort) == 22)
     {
@@ -436,78 +440,74 @@ bool PacketDetect::packet_AnalyzeInline(unsigned char *pkt_data, int len, nfq_da
             g_ctx.g_emergency_mode = true;
         }
     }
+    //printf("1Entering Analyze for IP: %u\n", src_ip);
 
-    // 1. 주기적 카운트 초기화 (동기식)
-    auto now = std::chrono::steady_clock::now();
+    // 2. 읽기 전용 검사 (Fast Reject/Accept)
     {
-        std::unique_lock<std::shared_mutex> lock(m_shared_statsMutex);
-        // std::lock_guard<std::mutex> lock(m_statsMutex); // 통계 데이터 보호
-        if (chrono::duration_cast<std::chrono::seconds>(now - m_last_check_time).count() >= 1)
+        std::shared_lock<std::shared_mutex> lock(m_shared_statsMutex);
+        if (local_blacklist.contains(src_ip))
         {
-            m_last_check_time = now;
-            m_accumulate_stat.clear();
-            m_mac_stat.clear();
+            return true; // 즉시 드랍
+        }
+        if (local_whitelist.contains(src_ip))
+        {
+            return false; // 즉시 통과
         }
     }
-    // 2. 패킷 정보 업데이트 (인라인 카운팅)
-    // 인라인 모드에서는 실시간으로 accumlate_stat에 바로 기록합니다.
+    // 3. 통계 업데이트 및 판단
+    // printf("Entering Analyze for IP: %u\n", src_ip);
     {
-        // std::lock_guard<std::mutex> lock(m_statsMutex);
         std::unique_lock<std::shared_mutex> lock(m_shared_statsMutex);
-        // std::shared_lock<std::shared_mutex> lock(m_shared_statsMutex);
         auto &stat = m_accumulate_stat[src_ip];
         stat.TotalCount++;
         if (pTcp->flags & 0x02)
             stat.syn_count++;
-    }
 
-    // 3. 탐지 로직 (기존 if-else 구조 유지)
-
-    {
-
-        // std::lock_guard<std::mutex> lock(m_statsMutex); // 통계 데이터 보호
-        std::shared_lock<std::shared_mutex> lock(m_shared_statsMutex);
-        // [검사 1] 블랙리스트 여부 확인 (가장 빠름)
-        if (local_blacklist.contains(src_ip))
+        // [A] 차단 조건 (DDoS 탐지)
+        if (stat.syn_count > 10 || stat.TotalCount > 100)
         {
-            struct in_addr ip_addr;
-            ip_addr.s_addr = (uint32_t)src_ip;
-            //printf("XDP DROP -> IP: %s\n", inet_ntoa(ip_addr));
-            printf("blacklist drop: %u\n", src_ip);
-            lock.unlock();
-            return true; // 즉시 DROP
+            // printf("blacklist insert: %u\n", src_ip);
+
+            local_blacklist.insert(src_ip);
+            UpdateXdpBlcaklist(src_ip);
+            // 만약 화이트리스트에 있었다면 제거 (신뢰 상실)
+            if (local_whitelist.erase(src_ip))
+                RemoveXdpWhitelist(src_ip);
+            return true;
         }
-
-        //[검사 2] SYN Flood / DDoS 임계치 체크
-        auto it = m_accumulate_stat.find(src_ip); // 안전한 읽기
-        if (it != m_accumulate_stat.end())
+        // [B] 화이트리스트 승격 조건
+        // 일정 시간 동안 정상 패킷을 꾸준히 보내온 IP는 화이트리스트로 승격
+        // 예: 1초 동안 패킷이 20개 이상 들어왔지만, SYN Flood 조건에는 한참 못 미치는 경우
+        if (local_whitelist.contains(src_ip) == false)
         {
-            if (it->second.syn_count > 10 || it->second.TotalCount > 100)
+            bool should_promote = false;
+
+            // 1. 확실한 증거: TCP 연결이 성립된 패킷(ACK)인 경우 (SYN은 아님)
+            if (pTcp->flags & 0x10) // ACK 플래그가 설정된 경우
             {
-                lock.unlock();
-                printf("[BLOCK] SYN Flood Detected from IP: %u. Dropping...\n", src_ip);
-                std::unique_lock<std::shared_mutex> u_lock(m_shared_statsMutex);
-                // std::lock_guard<std::mutex> lock(m_statsMutex); // 통계 데이터 보호
-                local_blacklist.insert(src_ip); // 블랙리스트 등록
-                if (XDP)
-                {
-                    UpdateXdpBlcaklist(src_ip);
-                }
-                return true; // DROP
+                should_promote = true;
+            }
+            // 2. 통계적 증거: 어느 정도 활동량이 증명된 경우
+            else if (stat.TotalCount > 10)
+            {
+                should_promote = true;
+            }
+            if (should_promote)
+            {
+                local_whitelist.insert(src_ip);
+                UpdateXdpWhitelist(src_ip); //커널 맵 동기화
+                //printf("whitelist insert: %u\n", src_ip);
             }
         }
     }
 
-    // [검사 3] Emergency Mode (First Drop / Greylist 로직)
+    // [검사] Emergency Mode (First Drop / Greylist 로직)
     if (g_ctx.g_emergency_mode)
     {
         if (pTcp->flags & 0x02)
         { // SYN 패킷일 때만
             {
                 std::shared_lock<std::shared_mutex> lock(m_shared_statsMutex);
-                // std::lock_guard<std::mutex> lock(m_statsMutex); // 통계 데이터 보호
-                //  std::shared_lock<std::shared_mutex> lock(m_statsMutex);
-
                 if (m_whitelist.contains(src_ip))
                 {
                     lock.unlock();
@@ -523,16 +523,17 @@ bool PacketDetect::packet_AnalyzeInline(unsigned char *pkt_data, int len, nfq_da
                 if (m_greylist.contains(src_ip))
                 {
 
-                    // printf("whitelist insert: %u\n", src_ip);
+                    printf("whitelist insert: %u\n", src_ip);
 
                     m_greylist.erase(src_ip);
                     m_whitelist.insert(src_ip);
+                    UpdateXdpWhitelist(src_ip);
                     return false; // 재전송 확인됨 -> 허용
                 }
                 else
                 {
                     // First Drop: 기록만 하고 패킷은 버림
-                    m_greylist.insert({src_ip, now});
+                    m_greylist.insert({src_ip});
                     // printf("greylist insert: %u\n", src_ip);
 
                     return true; // DROP
@@ -645,19 +646,71 @@ void PacketDetect::packet_ResetInline(unsigned char *pkt_data, int len, nfq_data
 void PacketDetect::UpdateXdpBlcaklist(uint32_t src_ip)
 {
     uint32_t value = 1;
-    // m_xdp_map_fd는 프로그램 시작 시 오픈한 맵의 파일 디스크립터
+    // m_xdp_black_map_fd는 프로그램 시작 시 오픈한 맵의 파일 디스크립터
 
-    if (g_ctx.m_xdp_map_fd == -1)
+    if (g_ctx.m_xdp_black_map_fd == -1)
     {
-        printf("m_xdp_map_fd = -1 !");
+        printf("m_xdp_black_map_fd = -1 !");
     }
 
-    if (bpf_map_update_elem(g_ctx.m_xdp_map_fd, &src_ip, &value, BPF_ANY) != 0)
+    if (bpf_map_update_elem(g_ctx.m_xdp_black_map_fd, &src_ip, &value, BPF_ANY) != 0)
     {
         fprintf(stderr, "Failed to update XDP map\n");
     }
     else
     {
         printf("[XDP] IP %u added to Kernel Blacklist!\n", src_ip);
+    }
+}
+
+void PacketDetect::RemoveXdpBlcaklist(uint32_t srcip)
+{
+    if (g_ctx.m_xdp_black_map_fd == -1)
+    {
+        printf("m_xdp_black_map_fd = -1 !");
+    }
+    if (bpf_map_delete_elem(g_ctx.m_xdp_black_map_fd, &srcip) != 0)
+    {
+        fprintf(stderr, "Failed to delete XDP blacklist map element\n");
+    }
+    else
+    {
+        printf("[XDP] IP %u removed from Kernel Blacklist!\n", srcip);
+    }
+}
+
+void PacketDetect::RemoveXdpWhitelist(uint32_t srcip)
+{
+    if (g_ctx.m_xdp_white_map_fd == -1)
+    {
+        printf("m_xdp_white_map_fd = -1 !");
+    }
+    if (bpf_map_delete_elem(g_ctx.m_xdp_white_map_fd, &srcip) != 0)
+    {
+        fprintf(stderr, "Failed to delete XDP whitelist map element\n");
+    }
+    else
+    {
+        printf("[XDP] IP %u removed from Kernel Whitelist!\n", srcip);
+    }
+}
+
+void PacketDetect::UpdateXdpWhitelist(uint32_t srcip)
+{
+    uint32_t value = 1;
+    // m_xdp_white_map_fd는 프로그램 시작 시 오픈한 맵의 파일 디스크립터
+
+    if (g_ctx.m_xdp_white_map_fd == -1)
+    {
+        printf("m_xdp_white_map_fd = -1 !");
+    }
+
+    if (bpf_map_update_elem(g_ctx.m_xdp_white_map_fd, &srcip, &value, BPF_ANY) != 0)
+    {
+        fprintf(stderr, "Failed to update XDP whitelist map\n");
+    }
+    else
+    {
+        printf("[XDP] IP %u added to Kernel Whitelist!\n", srcip);
     }
 }

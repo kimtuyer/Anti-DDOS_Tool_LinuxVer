@@ -24,15 +24,29 @@ public:
 	void packet_ResetInline(unsigned char *pkt_data, int len, nfq_data *nfa, const pcap_t *adhandle);
 
 	void UpdateXdpBlcaklist(uint32_t srcip);
+	void RemoveXdpBlcaklist(uint32_t srcip);
+
+	void RemoveXdpWhitelist(uint32_t srcip);
+	void UpdateXdpWhitelist(uint32_t srcip);
+
+
+
 	void ResetXdpBlacklist();
-private:
+	void ResetAccumulateStat()
+	{
+		std::unique_lock<std::shared_mutex> lock(m_shared_statsMutex);
+		m_accumulate_stat.clear();
+	}
+	private:
 	void _packet_DstSetting(DESTINATION eTarget);
 	std::vector<thread> ThreadPool;
 	set<uint32_t> local_blacklist;
+	set<uint32_t> local_whitelist;
 
+	
 	/*std::vector<map<uint32_t, pair<Packet, int>>>& m_pWorker_queues;
 	concurrency::concurrent_queue<uint32_t>& m_pBlacklist_queue;*/
-
+	
 	// const NetworkConfig& m_config;
 	SharedContext &g_ctx; // 참조
 	bool bRunnig{true};
@@ -45,5 +59,5 @@ private:
 	unordered_map<uint32_t, PacketCount> m_accumulate_stat;
 	std::unordered_map<uint64_t, int> m_mac_stat;
 	std::set<uint32_t> m_whitelist;
-	std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> m_greylist;
+	std::set<uint32_t> m_greylist;
 };

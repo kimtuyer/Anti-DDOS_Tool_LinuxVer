@@ -1,0 +1,26 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "(gdb) GameGuard Debug",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/GameGuard", 
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "gdb에 대해 자동 서식 지정 활성화",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "make build", 
+            "miDebuggerPath": "/usr/bin/gdb"
+        }
+    ]
+}

@@ -29,7 +29,7 @@
 #define __NETFILTER__
 #define __XDP__
 #define __XDP_GLOBALMAP__
-
+#define __XDP_WHITELIST__
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
 #include <libnetfilter_queue/libnetfilter_queue.h>

@@ -102,13 +102,19 @@ bool PacketMonitor::LoadXDP(const char *bpf_file, const char *if_name)
 	}
 
 // 4. 블랙리스트 맵 FD 저장 (가장 중요!)
-#ifdef __XDP_GLOBALMAP__
-	m_context->m_xdp_map_fd = bpf_object__find_map_fd_by_name(m_bpf_obj, "global_pps_map");
-#else
-	m_context->m_xdp_map_fd = bpf_object__find_map_fd_by_name(m_bpf_obj, "blacklist_map");
+	m_context->m_xdp_global_map_fd = bpf_object__find_map_fd_by_name(m_bpf_obj, "global_pps_map");
+	m_context->m_xdp_black_map_fd = bpf_object__find_map_fd_by_name(m_bpf_obj, "blacklist_map");
+#ifdef __XDP_WHITELIST__
+	m_context->m_xdp_white_map_fd = bpf_object__find_map_fd_by_name(m_bpf_obj, "whitelist_map");
+	if (m_context->m_xdp_white_map_fd < 0)
+	{
+		fprintf(stderr, "Error: Failed to find whitelist_map\n");
+		return false;
+	}
 #endif
 
-	printf("[System] XDP filter attached to %s (Map FD: %d)\n", if_name, m_context->m_xdp_map_fd);
+	printf("[System] XDP attached. Global FD: %d, White FD: %d\n",
+		   m_context->m_xdp_global_map_fd, m_context->m_xdp_white_map_fd);
 	return true;
 }
 

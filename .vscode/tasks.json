@@ -2,20 +2,25 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "make build",
+            "label": "make GameGuard",
+            "type": "shell",
+            "command": "make",
+            "args": ["GameGuard"],
+            "group": "build"
+        },
+        {
+            "label": "make active file",  // 디버깅 전용 빌드 태스크
             "type": "shell",
             "command": "make",
             "args": [
-                "GameGuard"
+                "${fileBasenameNoExtension}" // 현재 열린 파일이 epoll.c라면 'epoll'을 인자로 전달
             ],
             "group": {
                 "kind": "build",
                 "isDefault": true
             },
-            "problemMatcher": [
-                "$gcc"
-            ],
-            "detail": "Makefile을 호출하여 GameGuard 프로젝트 전체를 빌드합니다."
+            "problemMatcher": ["$gcc"],
+            "detail": "Makefile의 규칙을 이용해 현재 파일을 빌드합니다."
         }
     ]
 }
